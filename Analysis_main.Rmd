@@ -1,0 +1,199 @@
+---
+title: "Analysis"
+author: "Gordana Popovic"
+date: "8 April 2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = TRUE,
+	message = FALSE,
+	warning = FALSE
+)
+```
+
+
+
+To run analysis with alternate thresholds change below.
+```{r}
+rm(list=ls())
+which_threshold=50  #threshold to use
+source("soil_functions.R")
+
+#define survival object for both full model and the sub models with just ref or undermined
+if(which_threshold==50){
+  f_surv=Surv(soil_narrow$days.above.50pcSM+1, soil_narrow$da50C)
+  f_surv_Imp <- with(U_subdat,Surv(days.above.50pcSM+1, da50C))
+  f_surv_Ref<- with(R_subdat,Surv(days.above.50pcSM+1, da50C))
+}else if(which_threshold==25){
+  f_surv=Surv(soil_narrow$days.above.25pcSM+1, soil_narrow$da25C)
+  f_surv_Imp <- with(U_subdat,Surv(days.above.25pcSM+1, da25C))
+  f_surv_Ref<- with(R_subdat,Surv(days.above.25pcSM+1, da25C))
+}else if(which_threshold==75){
+  f_surv=Surv(soil_narrow$days.above.75pcSM+1, soil_narrow$da75C)
+  f_surv_Imp <- with(U_subdat,Surv(days.above.75pcSM+1, da75C))
+  f_surv_Ref<- with(R_subdat,Surv(days.above.75pcSM+1, da75C))
+}
+
+```
+
+
+### Does soil moisture persistence change with impact and veg type?
+
+Here we fit the model to our data, with all the predictors we think might have an effect. `frailty` is what they call random effects in the survival literature.
+
+```{r}
+
+mod_aft=survreg(f_surv~lsoil_moist_day_before+ltotal.rain.volume+laverage.days.no.rain+
+                  scarpdist +temp+precip+area_ratio+Probe_depth+
+                  veg_type_+Impact_+veg_type_Impact_+frailty(re),
+               dist='weibull',data=soil_narrow)
+anova(mod_aft)
+```
+
+The relevant p-values are next to veg_type, Impact and the interaction. Chi=square values are found by calculating differences in -2*LL.
+
+
+#### Plots
+
+```{r}
+ndX=model.matrix(~lsoil_moist_day_before+ltotal.rain.volume+laverage.days.no.rain+
+                  scarpdist +temp+precip+area_ratio+Probe_depth+
+                  veg_type*Impact,data=nd)
+```
+
+<!-- From https://bbolker.github.io/mixedmodels-misc/glmmFAQ.html -->
+```{r echo=FALSE, fig.height=3, fig.width=6, message=FALSE, warning=FALSE}
+nd$log_pred=ndX%*%matrix(mod_aft$coefficients)
+#plotting
+#extract the variance-covariance matrix of the parameters V
+Vb=mod_aft$var[1:ncol(ndX),1:ncol(ndX)]
+#compute XVX' to get the variance-covariance matrix of the predictions;
+#extract the diagonal of this matrix to get variances of predictions;
+#take the square-root of the variances to get the standard deviations (errors) of the predictions;
+Sp=sqrt(diag(ndX%*%Vb%*%t(ndX)))
+
+#define lower and upper bounds
+nd$log_lower=nd$log_pred-1*Sp
+nd$log_upper=nd$log_pred+1*Sp
+
+#days vector to predict
+x=seq(0.001,55,length.out = 1000)
+
+#mean and upper and lower bounds for plot
+a <- 1/mod_aft$scale      
+nd$b <- exp( nd$log_pred ) 
+nd$lower=exp(nd$log_lower)
+nd$upper=exp(nd$log_upper)
+
+
+pred=tibble()
+#predict persistence probability
+for(i in 1:nrow(nd)){
+  y <- 1-pweibull(x, shape=a, scale=nd$b[i])
+  upper=1-pweibull(x, shape=a, scale=nd$upper[i])
+  lower=1-pweibull(x, shape=a, scale=nd$lower[i])
+  pred=rbind(pred,data.frame(x=x,y=y,upper=upper,lower=lower,veg_type=nd$veg_type[i],Impact=nd$Impact[i] ))
+}
+
+pred$Impact=factor(pred$Impact,levels=levels(pred$Impact),labels=c("Unmined","Mined"))
+pred$veg_type=factor(pred$veg_type,levels=c("ttt","ch","wh","bt"),labels = c("Ti-tree thicket", "Cyperoid heath","Restioid heath / Sedgeland","Banksia thicket"))
+```
+
+```{r fig.height=4, fig.width=8}
+
+ggplot(pred,aes(x, y,color =Impact, fill=Impact)) +  
+  geom_ribbon(aes(ymin = lower, ymax = upper),linetype=2, alpha=0.1,data=pred) +
+  facet_grid(~veg_type)+labs(y="Probability of persistence",x="Days")+theme_light()+
+  scale_fill_manual(values=c("blue", "#E69F00"))+
+  scale_color_manual(values=c("blue", "#E69F00"))+
+  geom_line(size=1.1)+theme_classic()+
+  theme(strip.background = element_blank(),legend.title=element_blank(),legend.position = "bottom")
+```
+
+
+#### Confidence intervals
+```{r}
+mat_out=my_ci_survreg(mod_aft,ndX)
+mat_out$veg_type=nd$veg_type
+mat_out$Impact=nd$Impact
+mat_out[,c(20,21,17:19)]
+```
+
+
+### Do veg types differ for mined and unmined sites separately?
+
+
+```{r}
+mod_aft_Ref=survreg(f_surv_Ref~lsoil_moist_day_before+ltotal.rain.volume+laverage.days.no.rain+
+                  scarpdist +temp+precip+area_ratio+Probe_depth+
+                  veg_type+frailty(re),
+               dist='weibull',data=R_subdat)
+wr=confint(mod_aft_Ref,level = 0.9)[10,]
+anova(mod_aft_Ref)
+
+
+```
+
+Relevant p-value next to veg_type.
+
+```{r}
+mod_aft_Imp=survreg(f_surv_Imp~lsoil_moist_day_before+ltotal.rain.volume+laverage.days.no.rain+
+                  scarpdist +temp+precip+area_ratio+Probe_depth+
+                  veg_type+frailty(re),
+               dist='weibull',data=U_subdat)
+wi=confint(mod_aft_Imp,level = 0.9)[10,]
+
+anova(mod_aft_Imp)
+
+```
+
+Relevant p-value next to veg_type.
+
+### Does persistence change over time, does this change differ between mined and unmined sites?
+
+
+```{r}
+
+
+soil_narrow$date=as.Date(soil_narrow$date,format="%d/%m/%Y")
+soil_narrow$date_mined=as.Date(median(soil_narrow$date),format="%d/%m/%Y")
+
+
+soil_narrow$days_since=as.numeric(soil_narrow$date-soil_narrow$date_mined)
+soil_narrow$years_since=soil_narrow$days_since/365
+
+A=model.matrix(~veg_type*Impact +years_since*Impact,data=soil_narrow)[,-1]
+veg_type_=A[,1:3]
+Impact_=A[,4]
+years_since_=A[,5]
+veg_type_Impact_=A[,6:8]
+years_since_Impact_=A[,9]
+
+soil_narrow[,11:17]=apply(soil_narrow[,11:17],2,scale)
+
+
+f_surv_U <- with(soil_narrow,Surv(days.above.50pcSM+1, da50C))
+mod_aft_time=survreg(f_surv_U~lsoil_moist_day_before+ltotal.rain.volume+laverage.days.no.rain+
+                  scarpdist +temp+precip+area_ratio+Probe_depth+
+                  veg_type_+Impact_+veg_type_Impact_+years_since_+years_since_Impact_+frailty(re),
+               dist='weibull',data=soil_narrow)
+
+```
+
+
+```{r}
+anova(mod_aft_time)
+```
+
+```{r}
+summary(mod_aft_time)
+```
+Relevant p-value next to years_since and years_since_Impact.
+
+Calculate rate of reduction.
+```{r}
+1-exp(-0.000336-0.238997)
+```
+

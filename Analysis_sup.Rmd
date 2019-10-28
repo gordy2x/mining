@@ -1,0 +1,157 @@
+---
+title: "Supplementary analyses"
+author: "Gordana Popovic"
+date: "8 April 2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = TRUE,
+	message = FALSE,
+	warning = FALSE
+)
+```
+
+
+
+
+```{r}
+rm(list=ls())
+which_threshold=50
+library(coxme)
+source("soil_functions.R")
+
+#define survival object for both full model and the sub models with just ref or undermined
+if(which_threshold==50){
+  f_surv=Surv(soil_narrow$days.above.50pcSM+1, soil_narrow$da50C)
+  f_surv_Imp <- with(U_subdat,Surv(days.above.50pcSM+1, da50C))
+  f_surv_Ref<- with(R_subdat,Surv(days.above.50pcSM+1, da50C))
+}else if(which_threshold==25){
+  f_surv=Surv(soil_narrow$days.above.25pcSM+1, soil_narrow$da25C)
+  f_surv_Imp <- with(U_subdat,Surv(days.above.25pcSM+1, da25C))
+  f_surv_Ref<- with(R_subdat,Surv(days.above.25pcSM+1, da25C))
+}else if(which_threshold==75){
+  f_surv=Surv(soil_narrow$days.above.75pcSM+1, soil_narrow$da75C)
+  f_surv_Imp <- with(U_subdat,Surv(days.above.75pcSM+1, da75C))
+  f_surv_Ref<- with(R_subdat,Surv(days.above.75pcSM+1, da75C))
+}
+
+```
+
+### Does soil moisture persistence change with impact and veg type?
+
+
+```{r}
+mod_cox <- coxme(f_surv ~ lsoil_moist_day_before+ltotal.rain.volume+laverage.days.no.rain+
+                  scarpdist +temp+precip+area_ratio+Probe_depth+
+                  veg_type*Impact + (1 | Swamp/Probe_no), soil_narrow)
+anova(mod_cox)
+```
+
+
+## Cox model
+### Do veg types differ for mined and unmined sites separately?
+
+
+```{r}
+
+mod_cox_Ref <- coxme(f_surv_Ref ~ lsoil_moist_day_before+ltotal.rain.volume+laverage.days.no.rain+
+                  scarpdist +temp+precip+area_ratio+Probe_depth+
+                  veg_type + (1 | Swamp/Probe_no), R_subdat)
+anova(mod_cox_Ref)
+
+
+
+```
+
+
+
+
+```{r}
+
+U_subdat$scarpdist=scale(U_subdat$scarpdist)
+mod_cox_Imp <- coxme(f_surv_Imp ~ lsoil_moist_day_before+ltotal.rain.volume+laverage.days.no.rain+
+                  scarpdist +temp+precip+area_ratio+Probe_depth+
+                  veg_type + (1 | Swamp/Probe_no), U_subdat)
+anova(mod_cox_Imp)
+
+```
+
+## AFT model with random effects for Swamp instead of probe.
+
+### Does soil moisture persistence change with impact and veg type?
+
+
+
+```{r}
+
+mod_aft=survreg(f_surv~lsoil_moist_day_before+ltotal.rain.volume+laverage.days.no.rain+
+                  scarpdist +temp+precip+area_ratio+Probe_depth+
+                  veg_type_+Impact_+veg_type_Impact_+frailty(Swamp),
+               dist='weibull',data=soil_narrow)
+anova(mod_aft)
+```
+
+
+
+### Do veg types differ for mined and unmined sites separately?
+
+
+```{r}
+mod_aft_Ref=survreg(f_surv_Ref~lsoil_moist_day_before+ltotal.rain.volume+laverage.days.no.rain+
+                  scarpdist +temp+precip+area_ratio+Probe_depth+
+                  veg_type+frailty(Swamp),
+               dist='weibull',data=R_subdat)
+wr=confint(mod_aft_Ref,level = 0.9)[10,]
+anova(mod_aft_Ref)
+
+
+```
+
+
+
+
+```{r}
+mod_aft_Imp=survreg(f_surv_Imp~lsoil_moist_day_before+ltotal.rain.volume+laverage.days.no.rain+
+                  scarpdist +temp+precip+area_ratio+Probe_depth+
+                  veg_type+frailty(Swamp),
+               dist='weibull',data=U_subdat)
+wi=confint(mod_aft_Imp,level = 0.9)[10,]
+
+anova(mod_aft_Imp)
+
+```
+
+
+##  frailtypack
+
+```{r}
+library(frailtypack)
+modClu <- frailtyPenal(f_surv~
+cluster(Swamp)+subcluster(re)+lsoil_moist_day_before+ltotal.rain.volume+laverage.days.no.rain+
+                  scarpdist +temp+precip+area_ratio+Probe_depth+
+                  veg_type + Impact,
+data=soil_narrow,n.knots=8,kappa=c(50000),cross.validation = TRUE)
+
+
+summary(modClu)
+```
+
+Attempt to use frailtypack resulted in results with confidence intervals that were much too narrow to be trusted.
+
+
+## Different soil moisture cut-off (25% and 75%)
+
+These can be recreated with the main analysis code by changing the cut-off value in the top of the code.
+
+
+
+
+
+
+
+
+
+
+
